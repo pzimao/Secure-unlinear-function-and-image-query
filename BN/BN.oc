@@ -1,0 +1,182 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <obliv.oh>
+#include <math.h>
+#include "BN.h"
+#include "dbg.h"
+#include "../common/util.h"
+#include <assert.h>
+#include <time.h>
+void toObliv(protocolIO *io, obliv float *oa, float *a, int party) 
+{
+    for(int i = 0; i < io->n; i++) {
+        oa[i] = feedOblivFloat(a[i], party);
+    }
+}
+
+void check_input_count(protocolIO *io) 
+{
+    int nx = ocBroadcastInt(io->n, 1);
+    int ny = ocBroadcastInt(io->n, 2);
+    if (nx != ny) {
+        log_err("Unequal amount of data points.\n\t"
+                "X data points (party 1): %d\n\t"
+                "Y data points (party 2): %d\n", nx, ny);
+        clean_errno();	  
+        exit(1);
+    }
+}
+
+//求均值
+obliv float Mean(obliv float *a, obliv float *b,int n){
+    obliv float u=0;
+    obliv float sum=0;
+    for(int i=0;i<n;i++){
+        sum+=(a[i]-b[i]);
+    }
+    u=sum/n;
+    return u;
+}
+
+//求方差
+obliv float Variance(obliv float *a, obliv float *b,int n){
+    obliv float u=Mean(a,b,n);
+    //float result=0;
+    //revealOblivFloat(&result,u,0);
+    //printf("均值:%f;\r\n",result);
+    obliv float variance=0;
+    obliv float sum=0;
+    for(int i=0;i<n;i++){
+        sum+=((a[i]-b[i])-u)*((a[i]-b[i])-u);
+    }
+    variance=sum/n;
+    //float result=0;
+    //revealOblivFloat(&result,variance,0);
+    //printf("方差:%f;\r\n",result);
+    return variance;
+}
+
+
+obliv float * BN(protocolIO *io,obliv float beta, obliv float yeta, obliv float epsilon, obliv float *ox_r, obliv float *or1, obliv float *or2,int n){
+  obliv float * y=malloc(sizeof(obliv float)*n);
+  obliv float * x=malloc(sizeof(obliv float)*n);
+  obliv float u=Mean(ox_r,or1,n);//均值
+  
+  obliv float variance=Variance(ox_r,or1,n);//求方差
+  
+  float a=4;
+  float b=sqrt(a);
+  //由于做不了开方运算，这里先计算x^2,这里可以乘以一个因子 a*x^2
+  for(int i=0;i<n;i++){
+      x[i]=(((ox_r[i]-or1[i])-u)*((ox_r[i]-or1[i])-u)/(variance*variance+epsilon))*a;//归一化
+  }
+  
+  float x_2_a=0;
+  float x_b=0;
+  obliv float ox_b=0;
+  for(int i=0;i<n;i++){
+      revealOblivFloat(&x_2_a, x[i], 0);
+      x_b=sqrt(x_2_a);//开方
+      obliv if((ox_r[i]-or1[i])-u<0){
+        ox_b=x_b*(-1.0);
+      }else{
+        ox_b=x_b;
+      }
+      y[i]=yeta*ox_b+beta*b;//scale
+      y[i]=y[i]/b;
+  }
+  //加入随机噪声
+  for(int i=0;i<n;i++){
+      y[i]=y[i]+or2[i];
+  }
+  free(x);
+  return y;
+}
+
+void BN_layer(void* args) 
+{
+
+    int data_num=7000;
+    protocolIO *io = (protocolIO*) args;
+
+    float *x_r = malloc(sizeof(float) * data_num);
+    float *r1 = malloc(sizeof(float) * data_num);
+    float *r2 = malloc(sizeof(float) * data_num);
+
+
+    //服务器产生噪声
+    for(int i=0;i<data_num;i++){
+        r2[i]=random()%10;
+    }
+
+    check_mem(x_r, r1, ocCurrentParty());
+
+    // RESULTS
+    float result = 0; 
+    
+    load_dataU(io, &x_r, &r1, ocCurrentParty());
+    check_input_count(io);
+
+    obliv float *ox_r = malloc(sizeof(obliv float) * data_num);
+    obliv float *or1 = malloc(sizeof(obliv float) * data_num);
+    obliv float *or2 = malloc(sizeof(obliv float) * data_num);
+   
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+
+    obliv float beta=0.5;
+    obliv float yeta=0.5;
+    obliv float epsilon=0.1;
+
+    
+
+    lap = wallClock();
+    obliv float *re=BN(io,beta,yeta,epsilon,ox_r,or1,or2,data_num);
+    double runtime = wallClock() - lap; // stop clock here 
+    printf("Total time: %lf seconds\n", runtime);
+    printf("Yao Gate Count: %u\n", yaoGateCount());
+
+    //for(int i=0;i<data_num;i++){
+        //revealOblivFloat(&result,re[i], 0);
+        //x_r[i]=result;
+        //printf("%f ",i,result);
+    //}
+   
+    
+    //需要将先x_r和r1传递给S1和S2
+    //---------------首先得将float scale 1000----------
+    //int *x_r_int = malloc(sizeof(int) * data_num);
+    //int *r2_int = malloc(sizeof(int) * data_num);
+
+    //for(int i=0;i<data_num;i++){
+        //x_r_int[i]=(int)x_r[i]*1000;
+        //printf("%d;",x_r_int[i]);
+        //r2_int[i]=(int)r2[i]*1000;
+    //}
+    
+
+    //--------------将噪声r2和x+r2分别传递给s1和s2-----
+    //char * src="BN1.txt";
+    //FILE * fp=fopen(src,"wb");;
+    //if(fp==NULL){
+        //printf("打开文件失败！");
+    //}
+    //for(int i=0;i<data_num;i++){
+        //fprintf(fp,"%d ",r2_int[i]);
+    //}
+    //char ch[]="\n";
+    //fprintf(fp,"%s",ch);
+    //for(int i=0;i<data_num;i++){
+        //fprintf(fp,"%d ",x_r_int[i]);
+    //}
+    //fclose(fp);
+
+
+    free(x_r);
+    free(r1);
+    free(r2);
+    free(ox_r);
+    free(or1);
+    free(or2);
+}

@@ -1,0 +1,152 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <obliv.oh>
+#include <math.h>
+#include "relu.h"
+#include "dbg.h"
+#include <time.h>
+#include "../common/util.h"
+
+
+void toObliv(protocolIO *io, obliv int *oa, int *a, int party) 
+{
+    for(int i = 0; i < io->n; i++) {
+        oa[i] = feedOblivInt(a[i], party);
+    }
+}
+
+void check_input_count(protocolIO *io) 
+{
+    int nx = ocBroadcastInt(io->n, 1);
+    int ny = ocBroadcastInt(io->n, 2);
+    if (nx != ny) {
+        log_err("Unequal amount of data points.\n\t"
+                "X data points (party 1): %d\n\t"
+                "Y data points (party 2): %d\n", nx, ny);
+        clean_errno();	  
+        exit(1);
+    }
+}
+
+obliv int *relu(protocolIO *io,obliv int *ox_r, obliv int *or1, obliv int * or2,int n, int p){
+    obliv int * result=malloc(sizeof(obliv int)*n);
+    obliv int x=0;
+    int b;
+    for(int i=0;i<n;i++){
+        //第一部分首先消除r1
+        x=ox_r[i]-or1[i];
+
+       //第二部分relu
+        obliv if(x>p/2){
+            x=0;
+        }
+        result[i]=x;
+    
+        //第三部分加入随机噪声
+        //result[i]+=or2[i];
+    }
+    
+    return result;
+}
+
+void relu_layer(void* args) 
+{
+    int data_num=84;
+    protocolIO *io = ( protocolIO*)args;
+    int *x_r = malloc(sizeof(int) * data_num);
+    int *r1 = malloc(sizeof(int) * data_num);
+    int *r2 = malloc(sizeof(int) * data_num);
+
+    srand((unsigned int)time(NULL));
+    //-----------------server 产生随机噪声r2----------
+    for(int i=0;i<data_num;i++){
+        r2[i]=(rand()%10)*10000;
+    }
+    printf("\r\n");
+    check_mem(x_r, r1, ocCurrentParty());
+
+    // RESULTS
+    int result = 0; 
+    
+    //-----------------加载数据-------------
+    load_dataInt(io, &x_r, &r1, ocCurrentParty());
+    for(int i=0;i<data_num;i++){
+        printf("%d ",x_r[i]);
+    }
+    int *x = malloc(sizeof(int) * data_num);
+    
+    check_input_count(io);
+
+    obliv int *ox_r = malloc(sizeof(obliv int) * data_num);
+    obliv int *or1 = malloc(sizeof(obliv int) * data_num);
+    obliv int *or2 = malloc(sizeof(obliv int) * data_num);
+
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+    int p=1712129;
+   //-----------------执行relu---------------
+    obliv int * re=relu(io,ox_r,or1,or2,data_num,p);
+    //double runtime = wallClock() - lap; // stop clock here 
+    //printf("online time: %lf seconds\n", runtime);
+    //printf("Yao Gate Count: %u\n", yaoGateCount());
+
+    for(int i=0;i<data_num;i++){
+        revealOblivInt(&result,re[i], 0);
+        //printf("%d ",result);
+        x_r[i]=result;
+    }
+    //在这里恢复成真值传递给softmax
+    //float * f_x_r=malloc(sizeof(float)*data_num);
+    //float * f_r=malloc(sizeof(float)*data_num);
+    //for(int i=0;i<data_num;i++){
+        //f_x_r[i]=(float)x_r[i]/10000;
+        //f_r[i]=(float)r2[i]/10000;
+        //printf("%f ",f_x_r[i]-f_r[i]);
+    //}
+    
+    //传递给softmax---------------------------
+
+    //char * src_x_r= "/home/liufei/documents/2019/cnn/MNIST/result/relu_x_r_out.txt";
+    //char * src_r2= "/home/liufei/documents/2019/cnn/MNIST/result/relu_r_out.txt";
+
+    //FILE * fp1= fopen(src_x_r,"wb");
+    //FILE * fp2= fopen(src_r2, "wb");
+
+    //if(fp1==NULL || fp2==NULL){
+       //printf("打开文件失败！");
+    //}
+    //for(int i=0;i<data_num;i++){
+        //fprintf(fp1,"%f ",f_x_r[i]);
+        //fprintf(fp2,"%f ",f_r[i]);
+    //}
+    //fclose(fp1);
+    //fclose(fp2);
+    //传递给fc---------------------------------------
+
+    //需要将先x_r和r1传递给S1和S2
+
+    //--------------将噪声r2和x+r2分别传递给s1和s2-----
+    char * src="/home/liufei/documents/2019/cnn/MNIST/result/relu_1_out.txt";
+    
+    FILE * fp=fopen(src,"wb");
+    for(int i=0;i<data_num;i++){
+        fprintf(fp,"%d ",r2[i]);
+    }
+    char ch[]="\n";
+    fprintf(fp,"%s",ch);
+    for(int i=0;i<data_num;i++){
+        fprintf(fp,"%d ",x_r[i]);
+    }
+    fclose(fp);
+
+
+    //------------释放内存-----------------
+    free(x_r);
+    free(r1);
+    free(r2);
+    free(x);
+    free(ox_r);
+    free(or1);
+    free(or2);
+}

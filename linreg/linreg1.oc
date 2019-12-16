@@ -1,0 +1,323 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <obliv.oh>
+#include <math.h>
+#include "linreg1.h"
+#include "dbg.h"
+
+void toObliv(protocolIO *io, obliv float *oa, float *a, int party) 
+{
+    for(int i = 0; i < io->n; i++) {
+        oa[i] = feedOblivFloat(a[i], party);
+    }
+}
+
+obliv float osqr(obliv float x) 
+{
+    return x * x;
+}
+
+void check_input_count(protocolIO *io) 
+{
+    int nx = ocBroadcastInt(io->n, 1);
+    int ny = ocBroadcastInt(io->n, 2);
+    if (nx != ny) {
+        log_err("Unequal amount of data points.\n\t"
+                "X data points (party 1): %d\n\t"
+                "Y data points (party 2): %d\n", nx, ny);
+        clean_errno();	  
+        exit(1);
+    }
+}
+
+obliv float dotProd(obliv float *oa, obliv float *ob, int n) 
+{
+    obliv float dotProd = 0;
+    for (int i = 0; i < n; i++) {
+        dotProd += oa[i] * ob[i];
+    }
+    return dotProd;
+}
+
+obliv float sum(obliv float *a, int n) 
+{
+    obliv float sum = 0;
+    for (int i = 0; i < n; i++) {
+        sum += a[i];
+    }
+    return sum;
+}
+
+
+
+
+
+obliv float Euclidean_distance(obliv float *a, obliv float *b,int n){
+    obliv float sum = 0;
+    for(int i=0;i<n;i++){
+        sum+=(a[i]-b[i])*(a[i]-b[i]);
+    }
+    return sum;
+}
+
+
+
+
+
+
+void linear_regression(protocolIO *io, obliv float *ox, obliv float *oy, 
+                       obliv float om, obliv float ob, obliv float or) 
+{
+    int n = io->n;
+    obliv float sumx = sum(ox, n); // sum of x
+    obliv float sumxx = dotProd(ox, ox, n); // sum of each x squared
+    obliv float sumy = sum(oy, n); // sum of y
+    obliv float sumyy = dotProd(oy, oy, n); // sum of each y squared
+    obliv float sumxy = dotProd(ox, oy, n); // sum of each x * y
+
+    // Compute least-squares best fit straight line
+    om = (n * sumxy - (sumx * sumy)) / (n * sumxx - osqr(sumx)); // slope
+    ob = ((sumy * sumxx) - (sumx * sumxy)) / (n * sumxx - osqr(sumx)); // y-intercept
+
+    obliv float ocov = (n * sumxy) - (sumx * sumy);
+    obliv float ostddevs = ((n * sumxx) - osqr(sumx)) * ((n * sumyy) - osqr(sumy));
+    obliv float orsqr = osqr(ocov) * ostddevs; // sqrt(revealed rsqr) = r
+
+    revealOblivFloat(&io->rsqr, orsqr, 0);
+    revealOblivFloat(&io->m, om, 0);
+    revealOblivFloat(&io->b, ob, 0);
+}
+
+
+obliv float *sigmod(protocolIO *io,obliv float *ox_r, obliv float *or1, obliv float * or2,int n){
+    obliv float * result=malloc(sizeof(obliv float)*n);
+    obliv float *zero=malloc(sizeof(obliv float) * 1);
+    float *const_zero=malloc(sizeof(float)*1);
+    obliv float x=0;
+    *const_zero=(float)0;
+    toObliv(io, zero, const_zero, 1);
+    float b;
+    
+    for(int i=0;i<n;i++){
+        //第一部分首先消除r1
+        x=ox_r[i]-or1[i];
+       //第二部分relu
+        obliv if(x>1/2){
+            result[i]=1;
+        }else obliv if(x<-1/2){
+            result[i]=0;
+        }else{
+            result[i]=x+1/2;
+        }
+        //revealOblivFloat(&b, x, 0);
+        revealOblivFloat(&b, result[i], 0);
+        printf("result[%d]:%f;",i,b);
+        //第三部分加入随机噪声
+        result[i]+=or2[i];
+    }
+    printf("\r\n");
+    
+    return result;
+}
+
+void sigmod_layer(void* args) 
+{
+    protocolIO *io = (protocolIO*) args;
+
+    float *x_r = malloc(sizeof(float) * 3);
+    float *r1 = malloc(sizeof(float) * 3);
+    float *r2 = malloc(sizeof(float) * 3);
+    //server 产生随机噪声r2
+    for(int i=0;i<3;i++){
+        r2[i]=i+1;
+        printf("r2[%d]:%f;",r2[i]);
+    }
+    printf("\r\n");
+    check_mem(x_r, r1, ocCurrentParty());
+
+    // RESULTS
+    float result = 0; 
+    
+    load_data(io, &x_r, &r1, ocCurrentParty());
+    check_input_count(io);
+
+    obliv float *ox_r = malloc(sizeof(obliv float) * 3);
+    obliv float *or1 = malloc(sizeof(obliv float) * 3);
+    obliv float *or2 = malloc(sizeof(obliv float) * 3);
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+    free(x_r);
+    free(r1);
+    free(r2);
+    obliv float * re=sigmod(io,ox_r,or1,or2,3);
+    for(int i=0;i<3;i++){
+        revealOblivFloat(&result,re[i], 0);
+        printf("%f;",result);
+    }
+    
+    free(ox_r);
+    free(or1);
+    free(or2);
+}
+
+
+
+obliv float *relu(protocolIO *io,obliv float *ox_r, obliv float *or1, obliv float * or2,int n){
+    obliv float * result=malloc(sizeof(obliv float)*n);
+    obliv float *zero=malloc(sizeof(obliv float) * 1);
+    float *const_zero=malloc(sizeof(float)*1);
+    obliv float x=0;
+    *const_zero=(float)0;
+    toObliv(io, zero, const_zero, 1);
+    float b;
+    for(int i=0;i<n;i++){
+        //第一部分首先消除r1
+        x=ox_r[i]-or1[i];
+       //第二部分relu
+        obliv if(x<0){
+            x=0;
+        }
+        result[i]=x;
+        //revealOblivFloat(&b, x, 0);
+        revealOblivFloat(&b, result[i], 0);
+        printf("result[%d]:%f;",i,b);
+        //第三部分加入随机噪声
+        result[i]+=or2[i];
+    }
+    printf("\r\n");
+    
+    return result;
+}
+
+void relu_layer(void* args) 
+{
+    protocolIO *io = (protocolIO*) args;
+
+    float *x_r = malloc(sizeof(float) * 3);
+    float *r1 = malloc(sizeof(float) * 3);
+    float *r2 = malloc(sizeof(float) * 3);
+    //server 产生随机噪声r2
+    for(int i=0;i<3;i++){
+        r2[i]=i+1;
+        printf("r2[%d]:%f;",r2[i]);
+    }
+    printf("\r\n");
+    check_mem(x_r, r1, ocCurrentParty());
+
+    // RESULTS
+    float result = 0; 
+    
+    load_data(io, &x_r, &r1, ocCurrentParty());
+    check_input_count(io);
+
+    obliv float *ox_r = malloc(sizeof(obliv float) * 3);
+    obliv float *or1 = malloc(sizeof(obliv float) * 3);
+    obliv float *or2 = malloc(sizeof(obliv float) * 3);
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+    free(x_r);
+    free(r1);
+    free(r2);
+    obliv float * re=relu(io,ox_r,or1,or2,3);
+    for(int i=0;i<3;i++){
+        revealOblivFloat(&result,re[i], 0);
+        printf("%f;",result);
+    }
+    
+    free(ox_r);
+    free(or1);
+    free(or2);
+}
+
+
+
+obliv float sum_U(obliv float *x_r, obliv float *r1, int n) 
+{
+    obliv float sum_a= sum(x_r,n);
+    obliv float sum_b= sum(r1,n);
+    obliv float sum=sum_a-sum_b;
+    return sum;
+}
+
+obliv float * softmax(obliv float *x_r, obliv float *r1, obliv float *r2, int n){
+    obliv float sum=sum_U(x_r,r1,n);
+    obliv float * result=malloc(sizeof(obliv float)*n);
+    for(int i=0;i<n;i++){
+        result[i]=(x_r[i]-r1[i])/sum;
+    }
+    return result;
+}
+
+void softmax_layer(void* args) 
+{
+    protocolIO *io = (protocolIO*) args;
+
+    float *x_r = malloc(sizeof(float) * 3);
+    float *r1 = malloc(sizeof(float) * 3);
+    int *r2 = malloc(sizeof(int) * 3);
+    //server 产生随机噪声r2
+    for(int i=0;i<3;i++){
+        r2[i]=random()%10;
+    }
+    check_mem(x_r, r1, ocCurrentParty());
+
+    // RESULTS
+    float result = 0; 
+    
+    load_data(io, &x_r, &r1, ocCurrentParty());
+    check_input_count(io);
+
+    obliv float *ox_r = malloc(sizeof(obliv float) * 3);
+    obliv float *or1 = malloc(sizeof(obliv float) * 3);
+    obliv int *or2 = malloc(sizeof(obliv int) * 3);
+    
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+    free(x_r);
+    free(r1);
+    free(r2);
+    obliv float * re=softmax(ox_r,or1,or2,3);
+    for(int i=0;i<3;i++){
+        revealOblivFloat(&result,re[i], 0);
+        printf("result[%d]:%f;",i,result);
+    }
+    
+    free(ox_r);
+    free(or1);
+}
+
+
+
+void linReg(void* args) 
+{
+    protocolIO *io = (protocolIO*) args;
+
+    int *x = malloc(sizeof(int) * ALLOC);
+    int *y = malloc(sizeof(int) * ALLOC);
+    check_mem(x, y, ocCurrentParty());
+
+    // RESULTS
+    obliv float om = 0; 
+    obliv float ob = 0;
+    obliv float or = 0;
+    
+    load_data(io, &x, &y, ocCurrentParty());
+
+
+    check_input_count(io);
+
+    obliv float *ox = malloc(sizeof(obliv float) * io->n);
+    obliv float *oy = malloc(sizeof(obliv float) * io->n);
+    
+    toObliv(io, ox, x, 1);
+    toObliv(io, oy, y, 2);
+    free(x);
+    free(y);
+
+    linear_regression(io, ox, oy, om, ob, or);
+    free(ox);
+    free(oy);
+}

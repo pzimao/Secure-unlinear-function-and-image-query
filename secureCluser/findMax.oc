@@ -1,0 +1,112 @@
+#include <stdio.h>
+
+#include <stdlib.h>
+#include <obliv.oh>
+#include <math.h>
+#include "findMax.h"
+#include "dbg.h"
+#include "../common/util.h"
+#include <assert.h>
+#include <time.h>
+
+
+
+void toObliv(protocolIO *io, obliv float *oa, float *a, int party) 
+{
+    for(int i = 0; i < io->n; i++) {
+        oa[i] = feedOblivFloat(a[i], party);
+    }
+}
+
+void check_input_count(protocolIO *io) 
+{
+    int nx = ocBroadcastInt(io->n, 1);
+    int ny = ocBroadcastInt(io->n, 2);
+    if (nx != ny) {
+        log_err("Unequal amount of data points.\n\t"
+                "X data points (party 1): %d\n\t"
+                "Y data points (party 2): %d\n", nx, ny);
+        clean_errno();	  
+        exit(1);
+    }
+}
+
+obliv int findMax(protocolIO *io,obliv float * ox_r, obliv float *or1, obliv float * or2,int n){
+    obliv int max_index=0;
+    obliv float max_value=0;
+    obliv float x=0;
+    for(int i=0;i<n;i++){
+        x=ox_r[i]-or1[i];
+        obliv if(x>max_value){
+            max_index=i;
+            max_value=x;
+        }     
+    }
+    
+    return max_index;
+}
+
+void findMax_layer(void* args) 
+{
+    int data_num=10;
+    protocolIO *io = ( protocolIO*)args;
+    float *x_r = malloc(sizeof(float) * data_num);
+    float *r1 = malloc(sizeof(float) * data_num);
+    float *r2 = malloc(sizeof(float) * data_num);
+
+    srand((unsigned int)time(NULL));
+    //-----------------server1 产生随机噪声r,Server2 产生随机数r'----------
+    //float r=(float)rand()%2;
+    //float r'=(float) rand()%2;
+
+    check_mem(x_r, r1, ocCurrentParty());
+
+    
+    
+    //-----------------加载数据-------------
+    load_dataU(io, &x_r, &r1, ocCurrentParty());
+ 
+    //float *x = malloc(sizeof(float) * data_num);
+    
+    check_input_count(io);
+
+    obliv float *ox_r = malloc(sizeof(obliv float) * data_num);
+    obliv float *or1 = malloc(sizeof(obliv float) * data_num);
+    obliv float *or2 = malloc(sizeof(obliv float) * data_num);
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+    //toobliv(io,or,r2,2);
+    //-----------------执行relu---------------
+    lap = wallClock();
+    obliv int max_index=findMax(io,ox_r,or1,or2,data_num);
+    double runtime = wallClock() - lap; // stop clock here 
+    printf("Total time: %lf seconds\n", runtime);
+
+
+    // RESULTS
+    //int result = 0; 
+    //revealOblivInt(&result,max_index, 0);
+    //char * fmax_idx= "/home/liufei/documents/2019/cnn/tf_vgg16-10k/index_construction/max_index.txt";
+    //FILE * fp= fopen(fmax_idx,"wb");
+    //if(fp==NULL){
+       //printf("max_index不存在！");
+    //}
+    //fprintf(fp,"%d",result);
+    //printf("%d",result);
+
+
+
+    
+    //printf("Total time: %lf seconds\n", runtime);
+    //printf("Yao Gate Count: %u\n", yaoGateCount());
+   
+
+    //------------释放内存-----------------
+    free(x_r);
+    free(r1);
+    free(r2);
+    free(ox_r);
+    free(or1);
+    free(or2);
+}

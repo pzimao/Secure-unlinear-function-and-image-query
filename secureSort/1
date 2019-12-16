@@ -1,0 +1,37 @@
+//obliv int arr[SIZE];
+
+  int data_num=10;
+  protocolIO *io = ( protocolIO*)args;
+  int *x_r = malloc(sizeof(int) * data_num);
+  int *r1 = malloc(sizeof(int) * data_num);
+  int *r2 = malloc(sizeof(int) * data_num);
+
+  srand((unsigned int)time(NULL));
+    //-----------------server 产生随机噪声r2----------
+  for(int i=0;i<data_num;i++){
+    r2[i]=rand()%10;
+  }
+  printf("\r\n");
+  check_mem(x_r, r1, ocCurrentParty());
+
+    // RESULTS
+  int result = 0; 
+  load_dataInt(io, &x_r, &r1, ocCurrentParty());
+   int *x = malloc(sizeof(int) * data_num);
+    
+  check_input_count(io);
+
+  obliv int *ox_r = malloc(sizeof(obliv int) * data_num);
+  obliv int *or1 = malloc(sizeof(obliv int) * data_num);
+  obliv int *or2 = malloc(sizeof(obliv int) * data_num);
+  toObliv(io, ox_r, x_r, 1);
+  toObliv(io, or1, r1, 2);
+  toObliv(io, or2, r2, 2);
+  
+  int i;
+
+
+ for(int i=0;i<data_num;i++){
+      revealOblivInt(&res,arr[i],0);
+      printf("%d ",res);
+  } 

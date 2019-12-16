@@ -1,0 +1,122 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <obliv.oh>
+#include <math.h>
+#include<time.h>
+#include "softmax.h"
+#include "dbg.h"
+ 
+
+
+void toObliv(protocolIO *io, obliv int *oa, int *a, int party) 
+{
+    for(int i = 0; i < io->n; i++) {
+        oa[i] = feedOblivInt(a[i], party);
+    }
+}
+
+void check_input_count(protocolIO *io) 
+{
+    int nx = ocBroadcastInt(io->n, 1);
+    int ny = ocBroadcastInt(io->n, 2);
+    if (nx != ny) {
+        log_err("Unequal amount of data points.\n\t"
+                "X data points (party 1): %d\n\t"
+                "Y data points (party 2): %d\n", nx, ny);
+        clean_errno();	  
+        exit(1);
+    }
+}
+
+obliv int sum(obliv int *a, int n) 
+{
+    obliv int sum = 0;
+    for (int i = 0; i < n; i++) {
+        sum += a[i];
+    }
+    return sum;
+}
+
+obliv int sum_U(obliv int *x_r, obliv int *r1, int n) 
+{   
+    obliv int sum_a= sum(x_r,n);
+    obliv int sum_b= sum(r1,n);
+    obliv int sum=sum_a-sum_b;
+    return sum;
+}
+
+obliv float * softmax(obliv int *x_r, obliv int *r1, obliv int *r2, int n){
+    obliv int sum=sum_U(x_r,r1,n);
+    obliv float * result=malloc(sizeof(obliv float)*n);
+    for(int i=0;i<n;i++){
+        result[i]=(x_r[i]-r1[i])/sum;
+    }
+    //对每个数加上噪声
+    //or(int i=0;i<n;i++){
+        //result[i]=result[i]+r2[i];
+    //}
+    return result;
+}
+
+void softmax_layer(void* args) 
+{
+  
+    int data_num=256;
+    protocolIO *io = (protocolIO*) args;
+
+    int *float = malloc(sizeof(int) * data_num);
+    int *float = malloc(sizeof(int) * data_num);
+    int *float = malloc(sizeof(int) * data_num);
+    srand((unsigned int)time(NULL));
+
+    //----------server 产生随机噪声r2-----------
+    for(int i=0;i<data_num;i++){
+        r2[i]=rand()%10;
+    }
+    check_mem(x_r, r1, ocCurrentParty());
+
+    float result = 0; 
+    
+    //----------加载数据---------------------
+    //load_dataU(io, &x_r, &r1, ocCurrentParty());
+    
+
+    //check_input_count(io);
+    obliv int *ox_r =malloc(sizeof(obliv int) * data_num);
+    obliv int *or1 = malloc(sizeof(obliv int) * data_num);
+    obliv int *or2 = malloc(sizeof(obliv int) * data_num);
+    
+    toObliv(io, ox_r, x_r, 1);
+    toObliv(io, or1, r1, 2);
+    toObliv(io, or2, r2, 2);
+ 
+    //-----------执行softmax---------------
+    //obliv float * re=softmax(ox_r,or1,or2,data_num);
+    //for(int i=0;i<data_num;i++){
+        //revealOblivFloat(&result,re[i], 0);
+        //x_r[i]=result;
+        //printf("%f ",result);
+    //}
+    
+    char * src_x_r= "/home/liufei/documents/2019/cnn/result/descriptor_x_r_out.txt";
+    char * src_r2=  "/home/liufei/documents/2019/cnn/result/descriptor_r2_out.txt";
+
+    FILE * fp1= fopen(src_x_r,"wb");
+    FILE * fp2= fopen(src_r2, "wb");
+
+    if(fp1==NULL || fp2==NULL){
+       printf("打开文件失败！");
+    }
+    //for(int i=0;i<data_num;i++){
+        //fprintf(fp1,"%f ",x_r[i]);
+        //fprintf(fp2,"%f ",r2[i]);
+    //}
+    //fclose(fp1);
+    //fclose(fp2);
+
+    free(x_r);
+    free(r1);
+    free(r2);
+    free(ox_r);
+    free(or1);
+}

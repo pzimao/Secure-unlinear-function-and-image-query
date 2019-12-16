@@ -1,0 +1,102 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <obliv.oh>
+#include <math.h>
+#include "EuclideanDistance.h"
+#include "dbg.h"
+#include <time.h>
+
+
+void toObliv(protocolIO *io, obliv float *oa, float *a, int party) 
+{
+    for(int i = 0; i < io->n; i++) {
+        oa[i] = feedOblivFloat(a[i], party);
+    }
+}
+
+void check_input_count(protocolIO *io) 
+{
+    int nx = ocBroadcastInt(io->n, 1);
+    int ny = ocBroadcastInt(io->n, 2);
+    if (nx != ny) {
+        log_err("Unequal amount of data points.\n\t"
+                "X data points (party 1): %d\n\t"
+                "Y data points (party 2): %d\n", nx, ny);
+        clean_errno();	  
+        exit(1);
+    }
+}
+
+
+obliv float Euclidean_distance(obliv float *a, obliv float *b,int n){
+    obliv float sum = 0;
+    obliv float c=0;
+
+    for(int i=0;i<n;i++){     
+        sum+=(a[i]-b[i])*(a[i]-b[i]);
+    }
+    return sum;
+}
+
+void Euclidean_distance_computing(void* args) 
+{
+    //数据点的数量
+    int data_num=10;
+    protocolIO *io = (protocolIO*) args;
+
+    float *a = malloc(sizeof(float) * data_num);
+    float *b = malloc(sizeof(float) * data_num);
+    srand((unsigned int)time(NULL));
+    //-----------------server 产生随机噪声r2----------
+    float r=rand()%100;
+
+    check_mem(a, b, ocCurrentParty());
+
+    // RESULTS
+    float result = 0; 
+    
+    load_dataU(io, &a, &b, ocCurrentParty());
+    check_input_count(io);
+  
+
+    obliv float *oa = malloc(sizeof(obliv float) * data_num);
+    obliv float *ob = malloc(sizeof(obliv float) * data_num);
+   
+    toObliv(io, oa, a, 1);
+    toObliv(io, ob, b, 2);
+   
+    
+    obliv float re=Euclidean_distance(oa,ob,data_num);
+    float result=0;
+    revealOblivFloat(&result,re, 0);   
+
+    char * fre="/home/liufei/documents/2019/cnn/tf_vgg16-10k/image_query/distance.txt";
+    FILE * fp= fopen(fre,"wb");
+    fprintf(fp,"%f ",result);
+
+
+    //char * src_x_r= "/home/liufei/documents/2019/cnn/tf_vgg16-10k/image_query/x_r.txt";
+    //char * src_r2= "/home/liufei/documents/2019/cnn/tf_vgg16-10k/image_query/r.txt";
+
+    //FILE * fp1= fopen(src_x_r,"wb");
+    //FILE * fp2= fopen(src_r2, "wb");
+
+
+
+    //if(fp1==NULL || fp2==NULL){
+       //printf("打开文件失败！");
+    //}
+    //for(int i=0;i<data_num;i++){
+        //fprintf(fp1,"%f ",f_x_r[i]);
+        //fprintf(fp2,"%f ",f_r[i]);
+    //}
+   // fclose(fp1);
+   // fclose(fp2);
+
+    //revealOblivFloat(&result,re, 0);
+    //printf("result:%f;",result);
+    
+    
+    free(oa);
+    free(ob);
+}
